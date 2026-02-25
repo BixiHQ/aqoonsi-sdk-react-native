@@ -1,0 +1,2 @@
+ios/Frameworks/FaceTecSDK.xcframework/** filter=lfs diff=lfs merge=lfs -text
+android/libs/*.aar filter=lfs diff=lfs merge=lfs -text

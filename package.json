@@ -1,0 +1,47 @@
+{
+  "name": "@aqoonsi/sdk-react-native",
+  "version": "2.0.0",
+  "description": "Aqoonsi KYC React Native SDK with embedded FaceTec biometric verification",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "react-native": "src/index.ts",
+  "source": "src/index.ts",
+  "files": [
+    "src",
+    "ios",
+    "android",
+    "*.podspec"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BixiHQ/aqoonsi-sdk-react-native.git"
+  },
+  "homepage": "https://github.com/BixiHQ/aqoonsi-sdk-react-native#readme",
+  "bugs": {
+    "url": "https://github.com/BixiHQ/aqoonsi-sdk-react-native/issues"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-native": "^0.73.0",
+    "typescript": "^5.0.0"
+  },
+  "keywords": [
+    "kyc",
+    "identity",
+    "verification",
+    "facetec",
+    "react-native",
+    "somalia",
+    "aqoonsi",
+    "biometric"
+  ],
+  "author": "Bixi HQ",
+  "license": "MIT"
+}
