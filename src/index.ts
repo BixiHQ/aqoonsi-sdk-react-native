@@ -204,8 +204,9 @@ export class AqoonsiSDK {
   /**
    * Start a new KYC verification session, or resume one where the face scan
    * completed but the document scan was not finished.
-   * Returns { verificationId, resumed } — if resumed is true, call
-   * startIDScanOnly() instead of startDocumentScan() to skip the face scan.
+   * Returns { verificationId, resumed } — if resumed is true, the face scan
+   * was already completed but document scan was not. Use startDocumentScan()
+   * which performs a fresh face scan + document capture with 3D:2D matching.
    *
    * Note: externalUserId should be injected server-side by your backend proxy,
    * not passed from client code. Only pass it for server-to-server calls.
@@ -362,9 +363,11 @@ export class AqoonsiSDK {
   }
 
   /**
-   * Start a standalone document ID scan session without face matching (v10 blob-based).
-   * Uses FaceTec's startIDScanOnly — captures document and runs OCR but does NOT
-   * perform 3D:2D face matching. Use this when only document capture is needed.
+   * Start a standalone document ID scan session (v10 blob-based).
+   * Uses FaceTec's startIDScanOnly — captures document and runs OCR only.
+   *
+   * WARNING: This does NOT perform 3D:2D face matching. For Photo ID Match
+   * (face + document verification), use startDocumentScan() instead.
    */
   startIDScanOnly(): void {
     this.ensureInitialized();
@@ -386,7 +389,7 @@ export class AqoonsiSDK {
    * Uses FaceTec's start3DLivenessThen3DFaceMatch:
    * - If externalDatabaseRefID is NOT enrolled → 3D Enrollment
    * - If externalDatabaseRefID IS enrolled → 3D:3D Re-Verification (match level 0 or 15)
-   * Call this for returning users, followed by startIDScanOnly() for document capture.
+   * Call this for returning users. For document verification, use startDocumentScan().
    */
   startEnrollmentScan(): void {
     this.ensureInitialized();
