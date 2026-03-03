@@ -2,11 +2,13 @@ package com.aqoonsi.facetec;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.facebook.react.bridge.ActivityEventListener;
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
@@ -19,10 +21,10 @@ import com.facetec.sdk.FaceTecCustomization;
 import com.facetec.sdk.FaceTecSDK;
 import com.facetec.sdk.FaceTecSDKInstance;
 import com.facetec.sdk.FaceTecSessionRequestProcessor;
-import com.facetec.sdk.FaceTecSessionRequestProcessorCallback;
 import com.facetec.sdk.FaceTecSessionResult;
 import com.facetec.sdk.FaceTecSessionStatus;
 import com.facetec.sdk.FaceTecInitializationError;
+import com.facetec.sdk.FaceTecSecurityWatermarkImage;
 
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -41,12 +43,12 @@ import org.json.JSONObject;
  * with configurable endpoints for different verification flows.
  */
 public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
-    implements FaceTecSessionRequestProcessor, FaceTecSDK.InitializeCallback {
+    implements FaceTecSessionRequestProcessor, FaceTecSDK.InitializeCallback, ActivityEventListener {
 
   private static final String TAG = "AqoonsiFaceTecModule";
 
   private FaceTecSDKInstance sdkInstance;
-  private volatile FaceTecSessionRequestProcessorCallback sessionRequestCallback;
+  private volatile FaceTecSessionRequestProcessor.Callback sessionRequestCallback;
   private String enrollmentIdentifier = "";
   private SessionType currentSessionType = SessionType.LIVENESS;
   private volatile boolean isInitializing = false;
@@ -78,6 +80,7 @@ public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
 
   AqoonsiFaceTecModule(ReactApplicationContext context) {
     super(context);
+    context.addActivityEventListener(this);
   }
 
   @NonNull
@@ -92,6 +95,36 @@ public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
     this.sessionRequestCallback = null;
     this.sdkInstance = null;
     this.isInitializing = false;
+  }
+
+  // ================== ActivityEventListener ==================
+
+  @Override
+  public void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
+    if (sdkInstance == null) return;
+    try {
+      FaceTecSessionResult sessionResult = sdkInstance.getActivitySessionResult(requestCode, resultCode, data);
+      if (sessionResult != null) {
+        FaceTecSessionStatus status = sessionResult.getStatus();
+
+        WritableMap body = Arguments.createMap();
+        body.putString("sessionType", this.currentSessionType.getValue());
+        body.putInt("status", status.ordinal());
+        body.putString("statusDescription", getSessionStatusDescription(status));
+        body.putBoolean("success", status == FaceTecSessionStatus.SESSION_COMPLETED);
+
+        sendEvent("onFaceTecExit", body);
+
+        this.sessionRequestCallback = null;
+      }
+    } catch (Exception e) {
+      Log.e(TAG, "Error processing activity result", e);
+    }
+  }
+
+  @Override
+  public void onNewIntent(Intent intent) {
+    // Not used
   }
 
   // ================== Server Configuration ==================
@@ -181,7 +214,7 @@ public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
             this,
             new FaceTecSDK.InitializeCallback() {
               @Override
-              public void onFaceTecSDKInitializeSuccess(FaceTecSDKInstance instance) {
+              public void onSuccess(FaceTecSDKInstance instance) {
                 sdkInstance = instance;
                 isInitializing = false;
                 Log.d(TAG, "FaceTec SDK v10 initialized successfully");
@@ -192,7 +225,7 @@ public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
               }
 
               @Override
-              public void onFaceTecSDKInitializeError(FaceTecInitializationError error) {
+              public void onError(FaceTecInitializationError error) {
                 isInitializing = false;
                 String message = getInitErrorDescription(error);
                 Log.e(TAG, "FaceTec SDK initialization failed: " + message);
@@ -210,12 +243,12 @@ public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
   // ================== FaceTecSDK.InitializeCallback ==================
 
   @Override
-  public void onFaceTecSDKInitializeSuccess(FaceTecSDKInstance instance) {
+  public void onSuccess(FaceTecSDKInstance instance) {
     this.sdkInstance = instance;
   }
 
   @Override
-  public void onFaceTecSDKInitializeError(FaceTecInitializationError error) {
+  public void onError(FaceTecInitializationError error) {
     Log.e(TAG, "SDK init error: " + getInitErrorDescription(error));
   }
 
@@ -241,7 +274,7 @@ public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
       customization.getOverlayCustomization().brandingImage = 0;
       customization.getOverlayCustomization().showBrandingImage = false;
 
-      customization.securityWatermarkImage = FaceTecCustomization.FaceTecSecurityWatermarkImage.FACETEC;
+      customization.securityWatermarkImage = FaceTecSecurityWatermarkImage.FACETEC;
 
       customization.getGuidanceCustomization().backgroundColors = text;
       customization.getGuidanceCustomization().foregroundColor = primary;
@@ -304,7 +337,7 @@ public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
       customization.getFrameCustomization().borderWidth = 0;
       customization.getFrameCustomization().cornerRadius = 0;
 
-      customization.securityWatermarkImage = FaceTecCustomization.FaceTecSecurityWatermarkImage.FACETEC;
+      customization.securityWatermarkImage = FaceTecSecurityWatermarkImage.FACETEC;
       customization.getOverlayCustomization().showBrandingImage = false;
 
       FaceTecSDK.setCustomization(customization);
@@ -373,31 +406,25 @@ public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
       }
 
       try {
-        android.content.Intent intent = null;
-
         switch (sessionType) {
           case "liveness":
-            intent = sdkInstance.start3DLiveness(currentActivity, this);
+            sdkInstance.start3DLiveness(currentActivity, this);
             break;
           case "enrollment":
-            intent = sdkInstance.start3DLivenessThen3DFaceMatch(currentActivity, this);
+            sdkInstance.start3DLivenessThen3DFaceMatch(currentActivity, this);
             break;
           case "idScan":
-            intent = sdkInstance.startIDScanOnly(currentActivity, this);
+            sdkInstance.startIDScanOnly(currentActivity, this);
             break;
           case "photoIdMatch":
-            intent = sdkInstance.start3DLivenessThen3D2DPhotoIDMatch(currentActivity, this);
+            sdkInstance.start3DLivenessThen3D2DPhotoIDMatch(currentActivity, this);
             break;
           case "officialIdCapture":
-            intent = sdkInstance.startSecureOfficialIDPhotoCapture(currentActivity, this);
+            sdkInstance.startSecureOfficialIDPhotoCapture(currentActivity, this);
             break;
           default:
             sendErrorEvent("Unknown session type: " + sessionType);
             return;
-        }
-
-        if (intent != null) {
-          currentActivity.startActivity(intent);
         }
       } catch (Exception e) {
         Log.e(TAG, "Error launching session", e);
@@ -409,7 +436,7 @@ public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
   // ================== FaceTecSessionRequestProcessor (v10) ==================
 
   @Override
-  public void onSessionRequest(String sessionRequestBlob, FaceTecSessionRequestProcessorCallback callback) {
+  public void onSessionRequest(String sessionRequestBlob, FaceTecSessionRequestProcessor.Callback callback) {
     this.sessionRequestCallback = callback;
 
     String phase = this.isInitializing ? "initialization" : "session";
@@ -417,7 +444,7 @@ public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
     handleSessionRequest(sessionRequestBlob, callback);
   }
 
-  private void handleSessionRequest(String sessionRequestBlob, FaceTecSessionRequestProcessorCallback callback) {
+  private void handleSessionRequest(String sessionRequestBlob, FaceTecSessionRequestProcessor.Callback callback) {
     if (this.serverUrl.isEmpty()) {
       Log.e(TAG, "Server URL not configured — call setServerUrl() or configureServer() first");
       callback.abortOnCatastrophicError();
@@ -516,26 +543,11 @@ public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
     }).start();
   }
 
-  @Override
-  public void onFaceTecExit(FaceTecSessionResult sessionResult) {
-    FaceTecSessionStatus status = sessionResult.getStatus();
-
-    WritableMap body = Arguments.createMap();
-    body.putString("sessionType", this.currentSessionType.getValue());
-    body.putInt("status", status.ordinal());
-    body.putString("statusDescription", getSessionStatusDescription(status));
-    body.putBoolean("success", status == FaceTecSessionStatus.SESSION_COMPLETED_SUCCESSFULLY);
-
-    sendEvent("onFaceTecExit", body);
-
-    this.sessionRequestCallback = null;
-  }
-
   // ================== Response Handling from React Native ==================
 
   @ReactMethod
   public void proceedToNextStep(String responseBlob) {
-    FaceTecSessionRequestProcessorCallback cb = sessionRequestCallback;
+    FaceTecSessionRequestProcessor.Callback cb = sessionRequestCallback;
     if (cb != null) {
       cb.processResponse(responseBlob);
     }
@@ -543,7 +555,7 @@ public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
 
   @ReactMethod
   public void updateUploadProgress(float progress) {
-    FaceTecSessionRequestProcessorCallback cb = sessionRequestCallback;
+    FaceTecSessionRequestProcessor.Callback cb = sessionRequestCallback;
     if (cb != null) {
       cb.updateProgress(progress);
     }
@@ -551,7 +563,7 @@ public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
 
   @ReactMethod
   public void abortSession() {
-    FaceTecSessionRequestProcessorCallback cb = sessionRequestCallback;
+    FaceTecSessionRequestProcessor.Callback cb = sessionRequestCallback;
     if (cb != null) {
       cb.abortOnCatastrophicError();
     }
@@ -627,18 +639,10 @@ public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
     switch (error) {
       case DEVICE_NOT_SUPPORTED:
         return "Device is not supported.";
-      case DEVICE_LOCKED_OUT:
-        return "Device is locked out.";
-      case DEVICE_IN_LANDSCAPE_MODE:
-        return "Device is in landscape mode.";
-      case DEVICE_IN_REVERSE_PORTRAIT_MODE:
-        return "Device is in reverse portrait mode.";
-      case LICENSE_EXPIRED_OR_INVALID:
-        return "License is expired or invalid.";
-      case NETWORK_ISSUES:
-        return "Network issues during initialization.";
-      case GRACE_PERIOD_EXCEEDED:
-        return "Grace period exceeded.";
+      case REJECTED_BY_SERVER:
+        return "Initialization rejected by server.";
+      case REQUEST_ABORTED:
+        return "Initialization request was aborted.";
       default:
         return "Unknown initialization error.";
     }
@@ -646,46 +650,22 @@ public class AqoonsiFaceTecModule extends ReactContextBaseJavaModule
 
   private String getSessionStatusDescription(FaceTecSessionStatus status) {
     switch (status) {
-      case SESSION_COMPLETED_SUCCESSFULLY:
+      case SESSION_COMPLETED:
         return "Session completed successfully.";
-      case SESSION_UNSUCCESSFUL:
-        return "Session was unsuccessful.";
-      case USER_CANCELLED:
-        return "User cancelled the session.";
-      case USER_CANCELLED_VIA_HARDWARE_BUTTON:
-        return "User cancelled via hardware button.";
-      case USER_CANCELLED_VIA_CLICKABLE_READY_SCREEN_SUBTEXT:
-        return "User cancelled via ready screen.";
-      case CAMERA_PERMISSION_DENIED:
-        return "Camera permission was denied.";
-      case CONTEXT_SWITCH:
-        return "App went to background.";
-      case LANDSCAPE_MODE_NOT_ALLOWED:
-        return "Landscape orientation not allowed.";
-      case REVERSE_PORTRAIT_NOT_ALLOWED:
-        return "Reverse portrait not allowed.";
+      case REQUEST_ABORTED:
+        return "Session request was aborted.";
+      case USER_CANCELLED_FACE_SCAN:
+        return "User cancelled the face scan.";
+      case USER_CANCELLED_ID_SCAN:
+        return "User cancelled the ID scan.";
       case LOCKED_OUT:
         return "Too many failed attempts. Please try again later.";
-      case CAMERA_INITIALIZATION_ISSUE:
+      case CAMERA_ERROR:
         return "Camera initialization issue.";
+      case CAMERA_PERMISSIONS_DENIED:
+        return "Camera permission was denied.";
       case UNKNOWN_INTERNAL_ERROR:
         return "An unknown error occurred.";
-      case TIMEOUT:
-        return "Session timed out.";
-      case ENCRYPTION_KEY_INVALID:
-        return "Encryption key invalid.";
-      case NON_PRODUCTION_MODE_KEY_INVALID:
-        return "Development mode key invalid.";
-      case NON_PRODUCTION_MODE_NETWORK_REQUIRED:
-        return "Network required for development mode.";
-      case MISSING_GUIDANCE_IMAGES:
-        return "Missing guidance images.";
-      case INITIALIZATION_NOT_COMPLETED:
-        return "SDK initialization not completed.";
-      case DEVICE_NOT_SUPPORTED:
-        return "Device not supported.";
-      case SESSION_EXPIRED:
-        return "Session expired.";
       default:
         return "Unknown status: " + status.name();
     }
