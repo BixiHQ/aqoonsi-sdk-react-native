@@ -39,9 +39,12 @@ android {
 repositories {
   google()
   mavenCentral()
+  flatDir {
+    dirs "libs"
+  }
 }
 
 dependencies {
   implementation "com.facebook.react:react-native:+"
-  api files("libs/facetec-sdk-10.0.35.aar")
+  api(name: "facetec-sdk-10.0.35", ext: "aar")
 }
